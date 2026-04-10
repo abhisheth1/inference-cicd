@@ -795,41 +795,6 @@ def predict_from_dicom_dir(
     return run_case(case_meta)
 
 
-def _find_single_volume_file(root_dir: Path) -> Path:
-    allowed = [".nii.gz", ".nii", ".mhd", ".mha"]
-
-    files: List[Path] = []
-    for p in root_dir.rglob("*"):
-        if not p.is_file():
-            continue
-        name_lower = p.name.lower()
-        if any(name_lower.endswith(ext) for ext in allowed):
-            files.append(p)
-
-    if not files:
-        raise HTTPException(
-            status_code=400, detail="No supported medical volume file found in upload"
-        )
-
-    if len(files) > 1:
-        # Prefer .nii.gz first, then .nii, then .mhd, then .mha
-        def sort_key(p: Path) -> Tuple[int, str]:
-            name = p.name.lower()
-            if name.endswith(".nii.gz"):
-                rank = 0
-            elif name.endswith(".nii"):
-                rank = 1
-            elif name.endswith(".mhd"):
-                rank = 2
-            else:
-                rank = 3
-            return (rank, str(p))
-
-        files.sort(key=sort_key)
-
-    return files[0]
-
-
 def _find_dicom_root(extract_dir: Path) -> Path:
     try:
         read_dicom_series(str(extract_dir))
@@ -920,6 +885,85 @@ def predict_from_uploaded_dicom_zip_bytes(
             annotations_world_xyz=annotations_world_xyz,
             annotation_diameters_mm=annotation_diameters_mm,
             seriesuid=seriesuid or Path(filename).stem,
+        )
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _find_single_volume_file(root_dir: Path) -> Path:
+    allowed = [".nii.gz", ".nii", ".mhd", ".mha"]
+
+    files: List[Path] = []
+    for p in root_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        name_lower = p.name.lower()
+        if any(name_lower.endswith(ext) for ext in allowed):
+            files.append(p)
+
+    if not files:
+        raise HTTPException(
+            status_code=400,
+            detail="No supported medical volume file found in uploaded zip",
+        )
+
+    if len(files) > 1:
+
+        def sort_key(p: Path) -> Tuple[int, str]:
+            name = p.name.lower()
+            if name.endswith(".nii.gz"):
+                rank = 0
+            elif name.endswith(".nii"):
+                rank = 1
+            elif name.endswith(".mhd"):
+                rank = 2
+            else:
+                rank = 3
+            return (rank, str(p))
+
+        files.sort(key=sort_key)
+
+    return files[0]
+
+
+def predict_from_uploaded_volume_zip_bytes(
+    zip_bytes: bytes,
+    filename: str,
+    annotations_world_xyz: Optional[List[List[float]]],
+    annotation_diameters_mm: Optional[List[float]],
+    seriesuid: Optional[str],
+) -> Dict:
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Volume upload must be a .zip file")
+
+    temp_dir = tempfile.mkdtemp(prefix="volume_zip_upload_")
+    try:
+        zip_path = Path(temp_dir) / filename
+        with open(zip_path, "wb") as f:
+            f.write(zip_bytes)
+
+        extract_dir = Path(temp_dir) / "extracted"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+        except zipfile.BadZipFile:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is not a valid zip archive",
+            )
+
+        require_models_ready()
+
+        volume_path = _find_single_volume_file(extract_dir)
+
+        return predict_from_volume_path(
+            ct_path=str(volume_path),
+            lung_mask_path=None,
+            annotations_world_xyz=annotations_world_xyz,
+            annotation_diameters_mm=annotation_diameters_mm,
+            seriesuid=seriesuid or volume_path.stem,
         )
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

@@ -12,6 +12,7 @@ def test_root():
     data = r.json()
     assert data["message"] == "CT inference service is running"
     assert "/predict/upload-volume" in data["endpoints"]
+    assert "/predict/upload-volume-zip" in data["endpoints"]
     assert "/predict/upload-dicom-zip" in data["endpoints"]
     assert "model_ready" in data
 
@@ -108,3 +109,21 @@ def test_upload_dicom_zip_rejects_invalid_zip():
         "not a valid zip archive" in r.json()["detail"]
         or "No readable DICOM study found" in r.json()["detail"]
     )
+
+
+def test_upload_volume_zip_rejects_non_zip():
+    r = client.post(
+        "/predict/upload-volume-zip",
+        files={"file": ("bad.txt", b"hello", "text/plain")},
+    )
+    assert r.status_code == 400
+    assert "must be a .zip file" in r.json()["detail"]
+
+
+def test_upload_volume_zip_rejects_invalid_zip():
+    r = client.post(
+        "/predict/upload-volume-zip",
+        files={"file": ("case.zip", b"not a real zip", "application/zip")},
+    )
+    assert r.status_code == 400
+    assert "not a valid zip archive" in r.json()["detail"]

@@ -10,10 +10,11 @@ from app.model_loader import (
     predict_from_dicom_dir,
     predict_from_uploaded_dicom_zip_bytes,
     predict_from_uploaded_volume_bytes,
+    predict_from_uploaded_volume_zip_bytes,
     predict_from_volume_path,
 )
 
-app = FastAPI(title="CT Inference API", version="2.2.0")
+app = FastAPI(title="CT Inference API", version="2.3.0")
 
 
 class PathPredictRequest(BaseModel):
@@ -51,6 +52,7 @@ def root() -> Dict:
             ".mhd",
             ".mha",
             "uploaded volume file",
+            "uploaded volume zip",
             "uploaded DICOM zip",
         ],
         "storage_mode": "temporary upload staging with automatic cleanup",
@@ -60,6 +62,7 @@ def root() -> Dict:
             "/predict/path",
             "/predict/dicom-dir",
             "/predict/upload-volume",
+            "/predict/upload-volume-zip",
             "/predict/upload-dicom-zip",
         ],
     }
@@ -167,6 +170,42 @@ async def predict_upload_volume(
 
     return predict_from_uploaded_volume_bytes(
         file_bytes=content,
+        filename=filename,
+        annotations_world_xyz=parsed_annotations,
+        annotation_diameters_mm=parsed_diameters,
+        seriesuid=seriesuid,
+    )
+
+
+@app.post("/predict/upload-volume-zip")
+async def predict_upload_volume_zip(
+    file: UploadFile = File(...),
+    seriesuid: Optional[str] = Form(None),
+    annotations_world_xyz: Optional[str] = Form(None),
+    annotation_diameters_mm: Optional[str] = Form(None),
+) -> Dict:
+    filename = file.filename or "uploaded_volume.zip"
+
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Volume upload must be a .zip file")
+
+    content = await file.read()
+
+    parsed_annotations = None
+    parsed_diameters = None
+
+    if annotations_world_xyz:
+        import json
+
+        parsed_annotations = json.loads(annotations_world_xyz)
+
+    if annotation_diameters_mm:
+        import json
+
+        parsed_diameters = json.loads(annotation_diameters_mm)
+
+    return predict_from_uploaded_volume_zip_bytes(
+        zip_bytes=content,
         filename=filename,
         annotations_world_xyz=parsed_annotations,
         annotation_diameters_mm=parsed_diameters,
