@@ -8,7 +8,11 @@ pipeline {
         APP_PORT = "8000"
         TEST_PORT = "18000"
         VENV_DIR = ".venv"
+
         GITHUB_CREDENTIALS_ID = "github-token"
+        GITHUB_ACCOUNT = "abhisheth1"
+        GITHUB_REPO = "inference-cicd"
+        GITHUB_CONTEXT = "jenkins/inference-cicd"
     }
 
     options {
@@ -17,19 +21,20 @@ pipeline {
     }
 
     stages {
-        stage('Set Pending GitHub Status') {
-            steps {
-                githubNotify(
-                    credentialsId: "${GITHUB_CREDENTIALS_ID}",
-                    status: "PENDING",
-                    description: "Jenkins build started"
-                )
-            }
-        }
-
         stage('Checkout') {
             steps {
                 checkout scm
+                script {
+                    githubNotify(
+                        credentialsId: "${GITHUB_CREDENTIALS_ID}",
+                        account: "${GITHUB_ACCOUNT}",
+                        repo: "${GITHUB_REPO}",
+                        sha: env.GIT_COMMIT,
+                        context: "${GITHUB_CONTEXT}",
+                        status: "PENDING",
+                        description: "Jenkins build started"
+                    )
+                }
             }
         }
 
@@ -131,6 +136,10 @@ PY
         success {
             githubNotify(
                 credentialsId: "${GITHUB_CREDENTIALS_ID}",
+                account: "${GITHUB_ACCOUNT}",
+                repo: "${GITHUB_REPO}",
+                sha: env.GIT_COMMIT,
+                context: "${GITHUB_CONTEXT}",
                 status: "SUCCESS",
                 description: "Jenkins build passed"
             )
@@ -140,6 +149,10 @@ PY
         failure {
             githubNotify(
                 credentialsId: "${GITHUB_CREDENTIALS_ID}",
+                account: "${GITHUB_ACCOUNT}",
+                repo: "${GITHUB_REPO}",
+                sha: env.GIT_COMMIT,
+                context: "${GITHUB_CONTEXT}",
                 status: "FAILURE",
                 description: "Jenkins build failed"
             )
@@ -149,6 +162,10 @@ PY
         aborted {
             githubNotify(
                 credentialsId: "${GITHUB_CREDENTIALS_ID}",
+                account: "${GITHUB_ACCOUNT}",
+                repo: "${GITHUB_REPO}",
+                sha: env.GIT_COMMIT,
+                context: "${GITHUB_CONTEXT}",
                 status: "ERROR",
                 description: "Jenkins build aborted"
             )
