@@ -78,15 +78,17 @@ pipeline {
                     curl --fail http://127.0.0.1:${TEST_PORT}/
                     curl --fail http://127.0.0.1:${TEST_PORT}/health > health.json
 
-                    python3 - <<'PY'
-                    import json
-                    with open("health.json", "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    assert data["status"] == "ok", data
-                    assert data["generator_weights_exists"] is True, data
-                    assert data["classifier_weights_exists"] is True, data
-                    assert data["model_ready"] is True, data
-                    PY
+python3 - <<'PY'
+import json
+
+with open("health.json", "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+assert data["status"] == "ok", data
+assert data["generator_weights_exists"] is True, data
+assert data["classifier_weights_exists"] is True, data
+assert data["model_ready"] is True, data
+PY
 
                     docker rm -f ${TEST_CONTAINER_NAME}
                     rm -f health.json
