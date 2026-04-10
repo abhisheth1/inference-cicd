@@ -11,12 +11,8 @@ def test_root():
 
     data = r.json()
     assert data["message"] == "CT inference service is running"
-    assert (
-        data["storage_mode"] == "no temp files, no cache files, no visualization files"
-    )
-    assert "/predict/path" in data["endpoints"]
-    assert "/predict/dicom-dir" in data["endpoints"]
-    assert "/health" in data["endpoints"]
+    assert "/predict/upload-volume" in data["endpoints"]
+    assert "/predict/upload-dicom-zip" in data["endpoints"]
     assert "model_ready" in data
 
 
@@ -59,23 +55,6 @@ def test_predict_path_rejects_bad_extension(tmp_path):
     assert "Unsupported CT volume type" in r.json()["detail"]
 
 
-def test_predict_path_missing_lung_mask(tmp_path):
-    ct_file = tmp_path / "sample.nii.gz"
-    ct_file.write_text("placeholder")
-
-    missing_mask = tmp_path / "missing_mask.nii.gz"
-
-    r = client.post(
-        "/predict/path",
-        json={
-            "ct_path": str(ct_file),
-            "lung_mask_path": str(missing_mask),
-        },
-    )
-    assert r.status_code == 404
-    assert "Lung mask path not found" in r.json()["detail"]
-
-
 def test_predict_dicom_dir_missing_dir():
     r = client.post(
         "/predict/dicom-dir",
@@ -101,18 +80,31 @@ def test_predict_dicom_dir_rejects_file_instead_of_dir(tmp_path):
     assert "is not a directory" in r.json()["detail"]
 
 
-def test_predict_dicom_dir_missing_lung_mask(tmp_path):
-    dicom_dir = tmp_path / "dicom_case"
-    dicom_dir.mkdir()
-
-    missing_mask = tmp_path / "missing_mask.nii.gz"
-
+def test_upload_volume_rejects_bad_extension():
     r = client.post(
-        "/predict/dicom-dir",
-        json={
-            "dicom_dir": str(dicom_dir),
-            "lung_mask_path": str(missing_mask),
-        },
+        "/predict/upload-volume",
+        files={"file": ("bad.txt", b"hello", "text/plain")},
     )
-    assert r.status_code == 404
-    assert "Lung mask path not found" in r.json()["detail"]
+    assert r.status_code == 400
+    assert "Unsupported upload type" in r.json()["detail"]
+
+
+def test_upload_dicom_zip_rejects_non_zip():
+    r = client.post(
+        "/predict/upload-dicom-zip",
+        files={"file": ("bad.txt", b"hello", "text/plain")},
+    )
+    assert r.status_code == 400
+    assert "must be a .zip file" in r.json()["detail"]
+
+
+def test_upload_dicom_zip_rejects_invalid_zip():
+    r = client.post(
+        "/predict/upload-dicom-zip",
+        files={"file": ("study.zip", b"not a real zip", "application/zip")},
+    )
+    assert r.status_code == 400
+    assert (
+        "not a valid zip archive" in r.json()["detail"]
+        or "No readable DICOM study found" in r.json()["detail"]
+    )

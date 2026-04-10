@@ -21,6 +21,7 @@ COPY tests ./tests
 COPY outputs_candidate_generation ./outputs_candidate_generation
 COPY .pre-commit-config.yaml .
 COPY README.md .
+COPY Jenkinsfile .
 
 EXPOSE 8000
 

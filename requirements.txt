@@ -8,3 +8,4 @@ httpx
 pre-commit
 black
 ruff
+python-multipart

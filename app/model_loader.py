@@ -1,6 +1,9 @@
 import json
 import math
 import os
+import shutil
+import tempfile
+import zipfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -790,3 +793,133 @@ def predict_from_dicom_dir(
         seriesuid=seriesuid or Path(dicom_dir).name,
     )
     return run_case(case_meta)
+
+
+def _find_single_volume_file(root_dir: Path) -> Path:
+    allowed = [".nii.gz", ".nii", ".mhd", ".mha"]
+
+    files: List[Path] = []
+    for p in root_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        name_lower = p.name.lower()
+        if any(name_lower.endswith(ext) for ext in allowed):
+            files.append(p)
+
+    if not files:
+        raise HTTPException(
+            status_code=400, detail="No supported medical volume file found in upload"
+        )
+
+    if len(files) > 1:
+        # Prefer .nii.gz first, then .nii, then .mhd, then .mha
+        def sort_key(p: Path) -> Tuple[int, str]:
+            name = p.name.lower()
+            if name.endswith(".nii.gz"):
+                rank = 0
+            elif name.endswith(".nii"):
+                rank = 1
+            elif name.endswith(".mhd"):
+                rank = 2
+            else:
+                rank = 3
+            return (rank, str(p))
+
+        files.sort(key=sort_key)
+
+    return files[0]
+
+
+def _find_dicom_root(extract_dir: Path) -> Path:
+    try:
+        read_dicom_series(str(extract_dir))
+        return extract_dir
+    except Exception:
+        pass
+
+    for subdir in sorted([p for p in extract_dir.rglob("*") if p.is_dir()]):
+        try:
+            read_dicom_series(str(subdir))
+            return subdir
+        except Exception:
+            continue
+
+    raise HTTPException(
+        status_code=400, detail="No readable DICOM study found in uploaded zip"
+    )
+
+
+def predict_from_uploaded_volume_bytes(
+    file_bytes: bytes,
+    filename: str,
+    annotations_world_xyz: Optional[List[List[float]]],
+    annotation_diameters_mm: Optional[List[float]],
+    seriesuid: Optional[str],
+) -> Dict:
+    require_models_ready()
+
+    suffix = "".join(Path(filename).suffixes).lower()
+    allowed = {".nii", ".nii.gz", ".mha", ".mhd"}
+    if suffix not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported upload type: {suffix}. Use one of {sorted(allowed)}",
+        )
+
+    temp_dir = tempfile.mkdtemp(prefix="ct_upload_")
+    try:
+        temp_path = Path(temp_dir) / filename
+        with open(temp_path, "wb") as f:
+            f.write(file_bytes)
+
+        return predict_from_volume_path(
+            ct_path=str(temp_path),
+            lung_mask_path=None,
+            annotations_world_xyz=annotations_world_xyz,
+            annotation_diameters_mm=annotation_diameters_mm,
+            seriesuid=seriesuid or Path(filename).stem,
+        )
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def predict_from_uploaded_dicom_zip_bytes(
+    zip_bytes: bytes,
+    filename: str,
+    annotations_world_xyz: Optional[List[List[float]]],
+    annotation_diameters_mm: Optional[List[float]],
+    seriesuid: Optional[str],
+) -> Dict:
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="DICOM upload must be a .zip file")
+
+    temp_dir = tempfile.mkdtemp(prefix="dicom_upload_")
+    try:
+        zip_path = Path(temp_dir) / filename
+        with open(zip_path, "wb") as f:
+            f.write(zip_bytes)
+
+        extract_dir = Path(temp_dir) / "extracted"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+        except zipfile.BadZipFile:
+            raise HTTPException(
+                status_code=400, detail="Uploaded file is not a valid zip archive"
+            )
+
+        require_models_ready()
+
+        dicom_root = _find_dicom_root(extract_dir)
+
+        return predict_from_dicom_dir(
+            dicom_dir=str(dicom_root),
+            lung_mask_path=None,
+            annotations_world_xyz=annotations_world_xyz,
+            annotation_diameters_mm=annotation_diameters_mm,
+            seriesuid=seriesuid or Path(filename).stem,
+        )
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

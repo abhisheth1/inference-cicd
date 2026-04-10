@@ -1,17 +1,19 @@
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from app.model_loader import (
     get_service_status,
     initialize_models,
     predict_from_dicom_dir,
+    predict_from_uploaded_dicom_zip_bytes,
+    predict_from_uploaded_volume_bytes,
     predict_from_volume_path,
 )
 
-app = FastAPI(title="CT Inference API", version="2.1.0")
+app = FastAPI(title="CT Inference API", version="2.2.0")
 
 
 class PathPredictRequest(BaseModel):
@@ -48,13 +50,17 @@ def root() -> Dict:
             ".nii.gz",
             ".mhd",
             ".mha",
+            "uploaded volume file",
+            "uploaded DICOM zip",
         ],
-        "storage_mode": "no temp files, no cache files, no visualization files",
+        "storage_mode": "temporary upload staging with automatic cleanup",
         "model_ready": status["model_ready"],
         "endpoints": [
             "/health",
             "/predict/path",
             "/predict/dicom-dir",
+            "/predict/upload-volume",
+            "/predict/upload-dicom-zip",
         ],
     }
 
@@ -124,4 +130,81 @@ def predict_dicom_dir(req: DicomDirPredictRequest) -> Dict:
         annotations_world_xyz=req.annotations_world_xyz,
         annotation_diameters_mm=req.annotation_diameters_mm,
         seriesuid=req.seriesuid,
+    )
+
+
+@app.post("/predict/upload-volume")
+async def predict_upload_volume(
+    file: UploadFile = File(...),
+    seriesuid: Optional[str] = Form(None),
+    annotations_world_xyz: Optional[str] = Form(None),
+    annotation_diameters_mm: Optional[str] = Form(None),
+) -> Dict:
+    filename = file.filename or "uploaded_volume"
+    suffix = "".join(Path(filename).suffixes).lower()
+    allowed = {".nii", ".nii.gz", ".mha", ".mhd"}
+
+    if suffix not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported upload type: {suffix}. Use one of {sorted(allowed)}",
+        )
+
+    content = await file.read()
+
+    parsed_annotations = None
+    parsed_diameters = None
+
+    if annotations_world_xyz:
+        import json
+
+        parsed_annotations = json.loads(annotations_world_xyz)
+
+    if annotation_diameters_mm:
+        import json
+
+        parsed_diameters = json.loads(annotation_diameters_mm)
+
+    return predict_from_uploaded_volume_bytes(
+        file_bytes=content,
+        filename=filename,
+        annotations_world_xyz=parsed_annotations,
+        annotation_diameters_mm=parsed_diameters,
+        seriesuid=seriesuid,
+    )
+
+
+@app.post("/predict/upload-dicom-zip")
+async def predict_upload_dicom_zip(
+    file: UploadFile = File(...),
+    seriesuid: Optional[str] = Form(None),
+    annotations_world_xyz: Optional[str] = Form(None),
+    annotation_diameters_mm: Optional[str] = Form(None),
+) -> Dict:
+    filename = file.filename or "uploaded_dicom.zip"
+
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="DICOM upload must be a .zip file")
+
+    content = await file.read()
+
+    parsed_annotations = None
+    parsed_diameters = None
+
+    if annotations_world_xyz:
+        import json
+
+        parsed_annotations = json.loads(annotations_world_xyz)
+
+    if annotation_diameters_mm:
+        import json
+
+        parsed_diameters = json.loads(annotation_diameters_mm)
+
+    return predict_from_uploaded_dicom_zip_bytes(
+        zip_bytes=content,
+        filename=filename,
+        annotations_world_xyz=parsed_annotations,
+        annotation_diameters_mm=parsed_diameters,
+        seriesuid=seriesuid,
     )
