@@ -1,4 +1,11 @@
 fastapi
 uvicorn[standard]
+pydantic
+numpy
+SimpleITK
+torch
 pytest
 httpx
+pre-commit
+black
+ruff

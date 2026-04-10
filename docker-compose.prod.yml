@@ -1,7 +1,11 @@
+version: "3.9"
+
 services:
   inference-api:
-    image: inference-api:latest
+    build: .
     container_name: inference-api
-    restart: unless-stopped
     ports:
       - "8000:8000"
+    environment:
+      MODEL_OUT_DIR: /app/outputs_candidate_generation
+    restart: unless-stopped
