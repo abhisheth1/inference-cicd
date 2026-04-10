@@ -8,6 +8,7 @@ pipeline {
         APP_PORT = "8000"
         TEST_PORT = "18000"
         VENV_DIR = ".venv"
+        GITHUB_CREDENTIALS_ID = "github-token"
     }
 
     options {
@@ -16,6 +17,16 @@ pipeline {
     }
 
     stages {
+        stage('Set Pending GitHub Status') {
+            steps {
+                githubNotify(
+                    credentialsId: "${GITHUB_CREDENTIALS_ID}",
+                    status: "PENDING",
+                    description: "Jenkins build started"
+                )
+            }
+        }
+
         stage('Checkout') {
             steps {
                 checkout scm
@@ -79,7 +90,7 @@ pipeline {
                     curl --fail http://127.0.0.1:${TEST_PORT}/
                     curl --fail http://127.0.0.1:${TEST_PORT}/health > health.json
 
-python3 - <<'PY'
+                    python3 - <<'PY'
 import json
 
 with open("health.json", "r", encoding="utf-8") as f:
@@ -98,6 +109,9 @@ PY
         }
 
         stage('Deploy') {
+            when {
+                branch 'main'
+            }
             steps {
                 sh '''
                     docker rm -f ${CONTAINER_NAME} || true
@@ -115,11 +129,30 @@ PY
 
     post {
         success {
-            echo 'Build passed. Lint, smoke test, runtime validation, and deployment all succeeded.'
+            githubNotify(
+                credentialsId: "${GITHUB_CREDENTIALS_ID}",
+                status: "SUCCESS",
+                description: "Jenkins build passed"
+            )
+            echo 'Build passed. Lint, tests, runtime validation, and deployment succeeded.'
         }
 
         failure {
+            githubNotify(
+                credentialsId: "${GITHUB_CREDENTIALS_ID}",
+                status: "FAILURE",
+                description: "Jenkins build failed"
+            )
             echo 'Build failed. Deployment was blocked.'
+        }
+
+        aborted {
+            githubNotify(
+                credentialsId: "${GITHUB_CREDENTIALS_ID}",
+                status: "ERROR",
+                description: "Jenkins build aborted"
+            )
+            echo 'Build aborted.'
         }
 
         always {
