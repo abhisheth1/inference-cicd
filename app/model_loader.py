@@ -233,8 +233,8 @@ def rough_body_or_lung_mask(ct_zyx: np.ndarray) -> np.ndarray:
         comp = sitk.GetImageFromArray(mask[z].astype(np.uint8))
         comp = sitk.BinaryMorphologicalClosing(comp, [4, 4])
         comp = sitk.BinaryFillhole(comp)
-        arr = sitk.GetArrayFromImage(comp)[0]
-        per_slice.append(arr)
+        arr = sitk.GetArrayFromImage(comp)
+        per_slice.append(arr.astype(np.uint8))
 
     out = np.stack(per_slice, axis=0).astype(np.uint8)
     if out.sum() == 0:
